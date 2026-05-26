@@ -10,28 +10,34 @@ static const char *TAG = "scd4x";
 
 enum
 {
-    SCD4X_CMD_START_PERIODIC_MEASUREMENT             = 0x21B1,
-    SCD4X_CMD_READ_MEASUREMENT                       = 0xEC05,
-    SCD4X_CMD_STOP_PERIODIC_MEASUREMENT              = 0x3F86,
-    SCD4X_CMD_SET_TEMPERATURE_OFFSET                 = 0x241D,
-    SCD4X_CMD_GET_TEMPERATURE_OFFSET                 = 0x2318,
-    SCD4X_CMD_SET_SENSOR_ALTITUDE                    = 0x2427,
-    SCD4X_CMD_GET_SENSOR_ALTITUDE                    = 0x2322,
-    SCD4X_CMD_SET_AMBIENT_PRESSURE                   = 0xE000,
-    SCD4X_CMD_PERFORM_FORCED_RECALIBRATION           = 0x362F,
-    SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_ENABLED = 0x2416,
-    SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_ENABLED = 0x2313,
-    SCD4X_CMD_START_LOW_POWER_PERIODIC_MEASUREMENT   = 0x21AC,
-    SCD4X_CMD_GET_DATA_READY_STATUS                  = 0xE4B8,
-    SCD4X_CMD_PERSIST_SETTINGS                       = 0x3615,
-    SCD4X_CMD_GET_SERIAL_NUMBER                      = 0x3682,
-    SCD4X_CMD_PERFORM_SELF_TEST                      = 0x3639,
-    SCD4X_CMD_PERFORM_FACTORY_RESET                  = 0x3632,
-    SCD4X_CMD_REINIT                                 = 0x3646,
-    SCD4X_CMD_MEASURE_SINGLE_SHOT                    = 0x219D,
-    SCD4X_CMD_MEASURE_SINGLE_SHOT_RHT_ONLY           = 0x2196,
-    SCD4X_CMD_POWER_DOWN                             = 0x36E0,
-    SCD4X_CMD_WAKE_UP                                = 0x36F6,
+    SCD4X_CMD_START_PERIODIC_MEASUREMENT                     = 0x21B1,
+    SCD4X_CMD_READ_MEASUREMENT                               = 0xEC05,
+    SCD4X_CMD_STOP_PERIODIC_MEASUREMENT                      = 0x3F86,
+    SCD4X_CMD_SET_TEMPERATURE_OFFSET                         = 0x241D,
+    SCD4X_CMD_GET_TEMPERATURE_OFFSET                         = 0x2318,
+    SCD4X_CMD_SET_SENSOR_ALTITUDE                            = 0x2427,
+    SCD4X_CMD_GET_SENSOR_ALTITUDE                            = 0x2322,
+    SCD4X_CMD_SET_AMBIENT_PRESSURE                           = 0xE000,
+    SCD4X_CMD_PERFORM_FORCED_RECALIBRATION                   = 0x362F,
+    SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_ENABLED         = 0x2416,
+    SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_ENABLED         = 0x2313,
+    SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_TARGET          = 0x243a,
+    SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_TARGET          = 0x233f,
+    SCD4X_CMD_START_LOW_POWER_PERIODIC_MEASUREMENT           = 0x21AC,
+    SCD4X_CMD_GET_DATA_READY_STATUS                          = 0xE4B8,
+    SCD4X_CMD_PERSIST_SETTINGS                               = 0x3615,
+    SCD4X_CMD_GET_SERIAL_NUMBER                              = 0x3682,
+    SCD4X_CMD_PERFORM_SELF_TEST                              = 0x3639,
+    SCD4X_CMD_PERFORM_FACTORY_RESET                          = 0x3632,
+    SCD4X_CMD_REINIT                                         = 0x3646,
+    SCD4X_CMD_MEASURE_SINGLE_SHOT                            = 0x219D,
+    SCD4X_CMD_MEASURE_SINGLE_SHOT_RHT_ONLY                   = 0x2196,
+    SCD4X_CMD_POWER_DOWN                                     = 0x36E0,
+    SCD4X_CMD_WAKE_UP                                        = 0x36F6,
+    SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD  = 0x2445 ,
+    SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD  = 0x2340,
+    SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD = 0x244e,
+    SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD = 0x234b,
 };
 
 static uint8_t scd4x_crc8(const uint8_t *data, size_t length)
@@ -269,6 +275,14 @@ esp_err_t scd4x_set_ambient_pressure(scd4x_t *dev, uint16_t pressure_hpa)
     return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AMBIENT_PRESSURE, pressure_hpa);
 }
 
+esp_err_t scd4x_get_ambient_pressure(scd4x_t *dev, uint16_t *pressure_hpa)
+{
+    if (!dev || !pressure_hpa) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return scd4x_read_word(dev, SCD4X_CMD_SET_AMBIENT_PRESSURE, pressure_hpa);
+}
+
 esp_err_t scd4x_data_ready(scd4x_t *dev, bool *ready)
 {
     if (!dev || !ready) {
@@ -359,6 +373,22 @@ esp_err_t scd4x_get_automatic_self_calibration(scd4x_t *dev, bool *enabled)
     }
     *enabled = raw != 0;
     return ESP_OK;
+}
+
+esp_err_t scd4x_set_automatic_self_calibration_target(scd4x_t *dev, uint16_t target)
+{
+    if (!dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_TARGET, target);
+}
+
+esp_err_t scd4x_get_automatic_self_calibration_target(scd4x_t *dev, uint16_t *target)
+{
+    if (!dev || !target) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return scd4x_read_word(dev, SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_TARGET, target);
 }
 
 esp_err_t scd4x_start_low_power_periodic_measurement(scd4x_t *dev)
@@ -485,6 +515,43 @@ esp_err_t scd4x_wake_up(scd4x_t *dev)
     scd4x_write_command_nr(dev, SCD4X_CMD_WAKE_UP);
     scd4x_wait_ms(20);
     return ESP_OK;
+}
+
+esp_err_t scd4x_set_automatic_self_calibration_initial_period(scd4x_t *dev, uint16_t initial_period)
+{
+    if (!dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD, initial_period);
+}
+
+esp_err_t scd4x_get_automatic_self_calibration_initial_period(scd4x_t *dev, uint16_t *initial_period)
+{
+    if (!dev || !initial_period) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return scd4x_read_word(dev, SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD, initial_period);
+}
+
+
+esp_err_t scd4x_set_automatic_self_calibration_standard_period(scd4x_t *dev, uint16_t standard_period)
+{
+    if (!dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD, standard_period);
+}
+
+esp_err_t scd4x_get_automatic_self_calibration_standard_period(scd4x_t *dev, uint16_t *standard_period)
+{
+    if (!dev || !standard_period) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return scd4x_read_word(dev, SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD, standard_period);
 }
 
 scd4x_t *scd4x_init(i2c_master_bus_handle_t bus_handle, i2c_master_dev_handle_t dev_handle)

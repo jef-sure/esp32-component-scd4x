@@ -4,20 +4,25 @@ ESP-IDF component for the Sensirion SCD4x family (SCD40 / SCD41 / SCD43) CO2, te
 
 ## Sensor variants
 
-All three variants share the same I2C address (`0x62`), pinout and command set. The differences are sensor accuracy and supported measurement modes:
+All three variants share the same I2C address (`0x62`), pinout, command set and CO2 output range (0–40 000 ppm). They differ in the range over which Sensirion specifies the accuracy, the accuracy itself, and which measurement modes are supported:
 
-| Variant | CO2 accuracy | Periodic mode | Low-power periodic | Single-shot mode |
-|---------|--------------|---------------|--------------------|------------------|
-| SCD40   | ±(50 ppm + 5 % of reading), 400–2000 ppm | yes | yes | **no** |
-| SCD41   | ±(40 ppm + 5 % of reading), 400–5000 ppm (tightest in 400–1000 ppm: ±(50 ppm + 2.5 %)) | yes | yes | yes |
-| SCD43   | ±(30 ppm + 3 % of reading), 400–5000 ppm | yes | yes | yes |
+| Variant | Specified accuracy range | CO2 accuracy | Single-shot mode |
+|---------|--------------------------|--------------|------------------|
+| SCD40   | 400–2 000 ppm | ±(50 ppm + 5 % of reading) | **no** |
+| SCD41   | 400–5 000 ppm | ±(50 ppm + 2.5 %) @ 400–1 000 ppm; ±(50 ppm + 3 %) @ 1 001–2 000 ppm; ±(40 ppm + 5 %) @ 2 001–5 000 ppm | yes |
+| SCD43   | 400–5 000 ppm | ±(30 ppm + 3 % of reading) | yes |
 
-All variants share:
-- CO2 output range: 0–40 000 ppm
+Periodic and low-power periodic modes are supported by all three variants.
+
+Note: the sensor will report values across the full 0–40 000 ppm output range on all variants, but readings outside the specified accuracy range above are not guaranteed by Sensirion.
+
+All variants also share:
 - Temperature: −10 °C to 60 °C, ±0.8 °C (15–35 °C)
-- Humidity: 0–100 %RH, ±6 %RH (15–35 °C, 20–65 %RH)
+- Humidity: 0–100 %RH reporting range, ±6 %RH (15–35 °C, 20–65 %RH)
 - Supply: 2.4–5.5 V
 - Automatic Self-Calibration (ASC) and Forced Recalibration (FRC)
+
+> **Operating humidity limit:** the sensor is specified for **0–95 %RH, non-condensing** only. Prolonged exposure above 95 %RH, or any condensation (100 %RH / liquid water on the sensor), can permanently damage the device. Make sure the enclosure prevents condensation, especially if the sensor is used outdoors or in humid environments.
 
 Single-shot commands (`scd4x_measure_single_shot()`, `scd4x_measure_single_shot_rht_only()`, `scd4x_power_down()`, `scd4x_wake_up()`, and the ASC initial/standard period setters) are **only supported by SCD41 and SCD43**. Calling them on an SCD40 will NACK.
 

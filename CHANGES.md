@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.3
+
+Documentation fix: clarified the SCD40 / SCD41 / SCD43 comparison table in the
+README. The shared 0–40 000 ppm CO₂ output range is now listed separately
+from each variant's specified accuracy range, and the SCD41's three accuracy
+bands are spelled out individually. No code changes.
+
 ## 0.0.2
 
 Caught up with the latest SCD4x datasheet (rev. 1.7, April 2025) and taught

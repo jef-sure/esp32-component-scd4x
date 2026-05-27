@@ -56,3 +56,6 @@ dkms.conf
 
 dist/*
 build/*
+CD_DS_SCD4x_Datasheet_D1.pdf
+datasheet.txt
+.vscode/settings.json

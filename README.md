@@ -1,14 +1,36 @@
 # Sensirion SCD4x Component (ESP-IDF)
 
-ESP-IDF component for the Sensirion SCD4x (SCD40/SCD41) CO2, temperature, and humidity sensor over I2C.
+ESP-IDF component for the Sensirion SCD4x family (SCD40 / SCD41 / SCD43) CO2, temperature, and humidity sensors over I2C.
+
+## Sensor variants
+
+All three variants share the same I2C address (`0x62`), pinout and command set. The differences are sensor accuracy and supported measurement modes:
+
+| Variant | CO2 accuracy | Periodic mode | Low-power periodic | Single-shot mode |
+|---------|--------------|---------------|--------------------|------------------|
+| SCD40   | ±(50 ppm + 5 % of reading), 400–2000 ppm | yes | yes | **no** |
+| SCD41   | ±(40 ppm + 5 % of reading), 400–5000 ppm (tightest in 400–1000 ppm: ±(50 ppm + 2.5 %)) | yes | yes | yes |
+| SCD43   | ±(30 ppm + 3 % of reading), 400–5000 ppm | yes | yes | yes |
+
+All variants share:
+- CO2 output range: 0–40 000 ppm
+- Temperature: −10 °C to 60 °C, ±0.8 °C (15–35 °C)
+- Humidity: 0–100 %RH, ±6 %RH (15–35 °C, 20–65 %RH)
+- Supply: 2.4–5.5 V
+- Automatic Self-Calibration (ASC) and Forced Recalibration (FRC)
+
+Single-shot commands (`scd4x_measure_single_shot()`, `scd4x_measure_single_shot_rht_only()`, `scd4x_power_down()`, `scd4x_wake_up()`, and the ASC initial/standard period setters) are **only supported by SCD41 and SCD43**. Calling them on an SCD40 will NACK.
+
+Use `scd4x_get_sensor_variant()` at startup to detect the part and gate variant-specific calls accordingly.
 
 ## Features
 
 - Periodic and low-power periodic measurement modes
-- Single-shot measurement (SCD41 only)
+- Single-shot measurement (SCD41 / SCD43 only)
 - Temperature offset and altitude compensation
-- Forced recalibration and automatic self-calibration (ASC)
-- Power-down / wake-up for low-power applications
+- Forced recalibration and automatic self-calibration (ASC), incl. target / initial / standard period tuning
+- Power-down / wake-up for low-power applications (SCD41 / SCD43)
+- Sensor variant detection (SCD40 / SCD41 / SCD43)
 - Built-in CRC verification and I2C error recovery
 
 ## Requirements
@@ -21,15 +43,7 @@ ESP-IDF component for the Sensirion SCD4x (SCD40/SCD41) CO2, temperature, and hu
 From your project directory, use the [IDF Component Manager](https://docs.espressif.com/projects/idf-component-manager/en/latest/use/how_to_add_dependency.html) to add the dependency from Git:
 
 ```bash
-idf.py add-dependency scd4x --git https://github.com/jef-sure/esp32-component-scd4x.git
-```
-
-Or add it manually to your project's `main/idf_component.yml`:
-
-```yaml
-dependencies:
-  scd4x:
-    git: https://github.com/jef-sure/esp32-component-scd4x.git
+idf.py add-dependency jef-sure/scd4x
 ```
 
 Alternatively, clone into your project's `components/` directory:
@@ -56,7 +70,7 @@ The I2C address is fixed at `0x62`. Connect SDA/SCL to whichever GPIOs you confi
 #include "scd4x.h"
 
 // After initializing the I2C bus and adding device at address SCD4X_I2C_ADDR:
-scd4x_t *scd4x = scd4x_init(bus_handle, dev_handle);
+scd4x_t *scd4x = scd4x_init(dev_handle);
 
 scd4x_start_periodic_measurement(scd4x);
 
@@ -78,11 +92,16 @@ See [examples/example_main.c](examples/example_main.c) for a complete working ex
 ### Types
 
 ```c
+typedef enum __attribute__((packed)) {
+    SCD4X_MODE_IDLE               = 0,
+    SCD4X_MODE_PERIODIC           = 1,
+    SCD4X_MODE_LOW_POWER_PERIODIC = 2,
+} scd4x_mode_t;
+
 typedef struct {
-    i2c_master_bus_handle_t bus_handle;
     i2c_master_dev_handle_t i2c_dev;
-    bool has_error;
-    bool is_measuring;
+    bool         has_error;
+    scd4x_mode_t mode;
 } scd4x_t;
 
 typedef struct {
@@ -107,8 +126,8 @@ typedef struct {
 | `scd4x_stop_periodic_measurement()` | Stop periodic measurement, return to idle |
 | `scd4x_read_measurement()` | Read CO2, temperature, humidity. Returns `ESP_ERR_NOT_FINISHED` if not ready |
 | `scd4x_data_ready()` | Check if new data is available |
-| `scd4x_measure_single_shot()` | Single-shot CO2 + T + RH measurement (SCD41 only, blocks 5 s) |
-| `scd4x_measure_single_shot_rht_only()` | Single-shot T + RH only (SCD41 only, blocks 50 ms) |
+| `scd4x_measure_single_shot()` | Single-shot CO2 + T + RH measurement (SCD41 / SCD43, blocks 5 s) |
+| `scd4x_measure_single_shot_rht_only()` | Single-shot T + RH only (SCD41 / SCD43, blocks 50 ms) |
 
 ### Configuration
 
@@ -118,7 +137,8 @@ typedef struct {
 | `scd4x_get_temperature_offset()` | Read current temperature offset |
 | `scd4x_set_sensor_altitude()` | Set altitude for pressure compensation |
 | `scd4x_get_sensor_altitude()` | Read configured altitude |
-| `scd4x_set_ambient_pressure()` | Set ambient pressure in hPa (can be sent during measurement) |
+| `scd4x_set_ambient_pressure()` | Set ambient pressure in hPa (700..1200, can be sent during measurement) |
+| `scd4x_get_ambient_pressure()` | Read configured ambient pressure |
 | `scd4x_persist_settings()` | Save configuration to EEPROM (limited write cycles) |
 
 ### Calibration
@@ -128,6 +148,12 @@ typedef struct {
 | `scd4x_perform_forced_recalibration()` | Forced recalibration to known CO2 reference |
 | `scd4x_set_automatic_self_calibration()` | Enable/disable ASC |
 | `scd4x_get_automatic_self_calibration()` | Read ASC state |
+| `scd4x_set_automatic_self_calibration_target()` | Set ASC target CO2 concentration in ppm (default 400) |
+| `scd4x_get_automatic_self_calibration_target()` | Read ASC target CO2 concentration |
+| `scd4x_set_automatic_self_calibration_initial_period()` | Set ASC initial learning period (hours, multiple of 4) |
+| `scd4x_get_automatic_self_calibration_initial_period()` | Read ASC initial learning period |
+| `scd4x_set_automatic_self_calibration_standard_period()` | Set ASC standard learning period (hours, multiple of 4) |
+| `scd4x_get_automatic_self_calibration_standard_period()` | Read ASC standard learning period |
 
 ### Utility
 
@@ -137,6 +163,7 @@ typedef struct {
 | `scd4x_perform_self_test()` | Run built-in self-test |
 | `scd4x_perform_factory_reset()` | Reset all settings to factory defaults |
 | `scd4x_reinit()` | Reload settings from EEPROM |
+| `scd4x_get_sensor_variant()` | Read sensor variant (SCD40 / SCD41 / SCD43) |
 | `scd4x_power_down()` | Enter sleep mode |
 | `scd4x_wake_up()` | Wake from sleep mode |
 

@@ -53,7 +53,7 @@ void app_main(void)
     ESP_LOGI(TAG, "I2C initialized successfully");
 
     ESP_LOGI(TAG, "Initializing SCD4X...");
-    scd4x_t *scd4x = scd4x_init(bus_handle, dev_handle);
+    scd4x_t *scd4x = scd4x_init(dev_handle);
     if (!scd4x) {
         ESP_LOGE(TAG, "SCD4X initialization failed");
         return;

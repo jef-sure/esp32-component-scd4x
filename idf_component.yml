@@ -1,5 +1,5 @@
 ## IDF Component Manager Manifest File
-version: "0.0.1"
+version: "0.0.2"
 description: "ESP-IDF component for Sensirion SCD4x CO2, temperature, and humidity sensor over I2C"
 url: https://github.com/jef-sure/esp32-component-scd4x
 repository: https://github.com/jef-sure/esp32-component-scd4x.git
@@ -12,6 +12,9 @@ dependencies:
 
 tags:
   - scd4x
+  - scd40
+  - scd41
+  - scd43
   - co2
   - temperature
   - humidity

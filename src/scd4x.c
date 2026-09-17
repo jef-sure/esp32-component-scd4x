@@ -645,14 +645,12 @@ esp_err_t scd4x_deinit(scd4x_t **dev)
     if (!dev || !*dev) {
         return ESP_ERR_INVALID_STATE;
     }
+    esp_err_t ret = ESP_OK;
     scd4x_t *device = *dev;
     if (device->mode == SCD4X_MODE_PERIODIC || device->mode == SCD4X_MODE_LOW_POWER_PERIODIC) {
-        esp_err_t ret = scd4x_stop_periodic_measurement(device);
-        if (ret != ESP_OK) {
-            return ret;
-        }
+        ret = scd4x_stop_periodic_measurement(device);
     }
     free(device);
     *dev = NULL;
-    return ESP_OK;
+    return ret;
 }

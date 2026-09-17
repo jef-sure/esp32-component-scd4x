@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0
+
+- Added `scd4x_deinit()` to stop periodic measurement, release the driver
+  context, and clear the caller's pointer without removing the caller-owned I2C
+  device handle.
+- Added explicit sleep-state tracking and command-state validation. Commands
+  that require idle mode now return `ESP_ERR_INVALID_STATE` while measuring or
+  sleeping; periodic-mode exceptions follow the datasheet command table.
+- Documented that the driver is not thread-safe and should be owned by one task,
+  with other tasks communicating through messages.
+
 ## 0.0.3
 
 Documentation fix: clarified the SCD40 / SCD41 / SCD43 comparison table in the

@@ -3,18 +3,30 @@
 #include "driver/i2c_types.h"
 #include <stdbool.h>
 
+/**
+ * @brief SCD4x driver API.
+ *
+ * This driver is not thread-safe. One task must own the device and perform all
+ * sensor I/O. Other tasks should communicate with that task using queues or
+ * other message-passing primitives.
+ *
+ * Commands that the sensor only accepts while idle return ESP_ERR_INVALID_STATE
+ * in periodic measurement or sleep mode.
+ */
+
 typedef enum __attribute__((packed))
 {
     SCD4X_MODE_IDLE               = 0, /*!< Sensor is idle (no periodic measurement running) */
     SCD4X_MODE_PERIODIC           = 1, /*!< Periodic measurement (5 s interval) */
     SCD4X_MODE_LOW_POWER_PERIODIC = 2, /*!< Low-power periodic measurement (~30 s interval) */
+    SCD4X_MODE_SLEEP              = 3, /*!< Sensor is powered down */
 } scd4x_mode_t;
 
 typedef struct
 {
     i2c_master_dev_handle_t i2c_dev;   /*!< I2C master device handle */
     bool                    has_error; /*!< Flag to indicate if the device has encountered an error */
-    scd4x_mode_t            mode;      /*!< Last requested measurement mode (used for recovery) */
+    scd4x_mode_t            mode;      /*!< Current sensor operating state (used for validation and recovery) */
 } scd4x_t;
 
 typedef struct
@@ -44,6 +56,18 @@ typedef enum
  * @return Pointer to the allocated scd4x_t device, or NULL on failure
  */
 scd4x_t  *scd4x_init(i2c_master_dev_handle_t dev_handle);
+
+/**
+ * @brief Release the SCD4x driver context.
+ *
+ * Stops an active periodic measurement before releasing the context. The I2C
+ * device handle is owned by the caller and is not removed. On success, the
+ * caller's device pointer is set to NULL.
+ *
+ * @param[in,out] dev Address of the device handle
+ * @return ESP_OK on success; on failure, the context remains allocated
+ */
+esp_err_t scd4x_deinit(scd4x_t **dev);
 
 /**
  * @brief Read CO2, temperature and humidity from the sensor.
@@ -158,8 +182,9 @@ esp_err_t scd4x_stop_periodic_measurement(scd4x_t *dev);
 /**
  * @brief Start periodic measurement with a 5-second signal update interval.
  *
+ * The sensor must be in idle mode.
  * While running, only read_measurement, data_ready, stop_periodic_measurement
- * and set_ambient_pressure commands are allowed.
+ * and ambient pressure commands are allowed.
  *
  * @param dev Device handle
  * @return ESP_OK on success
@@ -170,6 +195,7 @@ esp_err_t scd4x_start_periodic_measurement(scd4x_t *dev);
  * @brief Start low-power periodic measurement (~30-second update interval).
  *
  * Reduces power consumption and self-heating at the cost of longer response time.
+ * The sensor must be in idle mode.
  *
  * @param dev Device handle
  * @return ESP_OK on success
@@ -181,6 +207,7 @@ esp_err_t scd4x_start_low_power_periodic_measurement(scd4x_t *dev);
  *
  * The sensor must have been operated in its intended mode for >3 minutes in a
  * stable CO2 environment, then stopped, before calling this function.
+ * Must be called while the sensor is in idle mode.
  * Max command duration: 400 ms.
  *
  * @param dev             Device handle
@@ -195,6 +222,7 @@ esp_err_t scd4x_perform_forced_recalibration(scd4x_t *dev, uint16_t target_co2_p
  *
  * ASC is enabled by default. The algorithm assumes exposure to 400 ppm at least
  * once per week. Use scd4x_persist_settings() to save to EEPROM.
+ * Must be called while the sensor is in idle mode.
  * Max command duration: 1 ms.
  *
  * @param dev     Device handle
@@ -206,6 +234,7 @@ esp_err_t scd4x_set_automatic_self_calibration(scd4x_t *dev, bool enabled);
 /**
  * @brief Get the current state of automatic self-calibration (ASC).
  *
+ * Must be called while the sensor is in idle mode.
  * Max command duration: 1 ms.
  *
  * @param dev          Device handle
@@ -232,6 +261,7 @@ esp_err_t scd4x_set_automatic_self_calibration_target(scd4x_t *dev, uint16_t ppm
 /**
  * @brief Get the ASC target CO2 concentration in ppm.
  *
+ * Must be called while the sensor is in idle mode.
  * Max command duration: 1 ms.
  *
  * @param dev          Device handle
@@ -261,6 +291,7 @@ esp_err_t scd4x_set_automatic_self_calibration_initial_period(scd4x_t *dev, uint
 /**
  * @brief Get the ASC initial learning period in hours.
  *
+ * Must be called while the sensor is in idle mode.
  * Max command duration: 1 ms.
  *
  * @param dev          Device handle
@@ -289,6 +320,7 @@ esp_err_t scd4x_set_automatic_self_calibration_standard_period(scd4x_t *dev, uin
 /**
  * @brief Get the ASC standard learning period in hours.
  *
+ * Must be called while the sensor is in idle mode.
  * Max command duration: 1 ms.
  *
  * @param dev          Device handle
@@ -301,7 +333,8 @@ esp_err_t scd4x_get_automatic_self_calibration_standard_period(scd4x_t *dev, uin
  * @brief Persist current configuration (temperature offset, altitude, ASC) to EEPROM.
  *
  * EEPROM is guaranteed for at least 2000 write cycles. Only call when actual
- * changes have been made. Max command duration: 800 ms.
+ * changes have been made. Must be called while the sensor is in idle mode.
+ * Max command duration: 800 ms.
  *
  * @param dev Device handle
  * @return ESP_OK on success
@@ -311,7 +344,8 @@ esp_err_t scd4x_persist_settings(scd4x_t *dev);
 /**
  * @brief Read the 48-bit unique serial number of the sensor.
  *
- * Can also be used to verify sensor presence. Max command duration: 1 ms.
+ * Can also be used to verify sensor presence. Must be called while the sensor
+ * is in idle mode. Max command duration: 1 ms.
  *
  * @param dev          Device handle
  * @param[out] serial  Array of 3 uint16_t words (big-endian, serial = word[0]<<32 | word[1]<<16 | word[2])
@@ -322,7 +356,8 @@ esp_err_t scd4x_get_serial_number(scd4x_t *dev, uint16_t serial[3]);
 /**
  * @brief Run the built-in self-test to check sensor functionality.
  *
- * Can be used as an end-of-line test. Max command duration: 10000 ms.
+ * Can be used as an end-of-line test. Must be called while the sensor is in
+ * idle mode. Max command duration: 10000 ms.
  *
  * @param dev              Device handle
  * @param[out] malfunction true if a malfunction was detected
@@ -333,6 +368,7 @@ esp_err_t scd4x_perform_self_test(scd4x_t *dev, bool *malfunction);
 /**
  * @brief Reset all configuration to factory defaults and erase FRC/ASC history.
  *
+ * Must be called while the sensor is in idle mode.
  * Max command duration: 1200 ms.
  *
  * @param dev Device handle
@@ -356,7 +392,8 @@ esp_err_t scd4x_reinit(scd4x_t *dev);
  * @brief Read the sensor variant (SCD40, SCD41 or SCD43).
  *
  * Uses the `get_sensor_variant` command (op-code 0x202F). The variant is
- * encoded in bits[15:12] of the response word. Max command duration: 1 ms.
+ * encoded in bits[15:12] of the response word. Must be called while the sensor
+ * is in idle mode. Max command duration: 1 ms.
  *
  * @param dev           Device handle
  * @param[out] variant  Decoded sensor variant
@@ -368,7 +405,7 @@ esp_err_t scd4x_get_sensor_variant(scd4x_t *dev, scd4x_variant_t *variant);
  * @brief Trigger a single-shot measurement of CO2, temperature and humidity (SCD41 / SCD43).
  *
  * Blocks for 5000 ms while the measurement completes. Read results with
- * scd4x_read_measurement() afterwards.
+ * scd4x_read_measurement() afterwards. Must be called while the sensor is idle.
  *
  * @param dev Device handle
  * @return ESP_OK on success
@@ -380,6 +417,7 @@ esp_err_t scd4x_measure_single_shot(scd4x_t *dev);
  *
  * Blocks for 50 ms while the measurement completes. CO2 field in
  * scd4x_read_measurement() output will be 0. Max command duration: 50 ms.
+ * Must be called while the sensor is idle.
  *
  * @param dev Device handle
  * @return ESP_OK on success
@@ -390,7 +428,7 @@ esp_err_t scd4x_measure_single_shot_rht_only(scd4x_t *dev);
  * @brief Put the sensor into sleep mode to reduce current consumption.
  *
  * The sensor will not respond to any command other than wake_up while sleeping.
- * Max command duration: 1 ms.
+ * Must be called while the sensor is idle. Max command duration: 1 ms.
  *
  * @param dev Device handle
  * @return ESP_OK on success

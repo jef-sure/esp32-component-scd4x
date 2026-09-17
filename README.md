@@ -43,6 +43,21 @@ Use `scd4x_get_sensor_variant()` at startup to detect the part and gate variant-
 - ESP-IDF >= 5.2.0
 - I2C master driver (`esp_driver_i2c`)
 
+## Task model
+
+This driver is not thread-safe. Give one FreeRTOS task exclusive ownership of
+each `scd4x_t` instance and perform all sensor I/O from that task. Other tasks
+should send requests to the owner through a queue or another message-passing
+mechanism and receive measurements through the same mechanism. Do not call the
+driver concurrently or share an instance between tasks without external
+serialization.
+
+The driver tracks the sensor state and rejects commands that are invalid in the
+current state with `ESP_ERR_INVALID_STATE`. Most configuration and utility
+commands require idle mode. During periodic measurement, only measurement
+readout, data-ready polling, stop, and ambient-pressure get/set are accepted.
+While powered down, only `scd4x_wake_up()` is accepted.
+
 ## Installation
 
 From your project directory, use the [IDF Component Manager](https://docs.espressif.com/projects/idf-component-manager/en/latest/use/how_to_add_dependency.html) to add the dependency from Git:
@@ -101,6 +116,7 @@ typedef enum __attribute__((packed)) {
     SCD4X_MODE_IDLE               = 0,
     SCD4X_MODE_PERIODIC           = 1,
     SCD4X_MODE_LOW_POWER_PERIODIC = 2,
+    SCD4X_MODE_SLEEP              = 3,
 } scd4x_mode_t;
 
 typedef struct {
@@ -121,6 +137,7 @@ typedef struct {
 | Function | Description |
 |----------|-------------|
 | `scd4x_init()` | Initialize sensor, stop any active measurement, allocate device handle |
+| `scd4x_deinit()` | Stop active periodic measurement, release the driver context, and clear the caller's pointer; does not remove the caller-owned I2C device |
 
 ### Measurement
 

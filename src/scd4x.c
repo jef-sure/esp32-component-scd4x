@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <stdlib.h>
 
 static const char *TAG = "scd4x";
 
@@ -71,6 +72,16 @@ static uint8_t scd4x_crc8(const uint8_t *data, size_t length)
 static void scd4x_wait_ms(int ms)
 {
     vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+static esp_err_t scd4x_require_idle(const scd4x_t *dev)
+{
+    return dev && dev->mode == SCD4X_MODE_IDLE ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+static esp_err_t scd4x_require_awake(const scd4x_t *dev)
+{
+    return dev && dev->mode != SCD4X_MODE_SLEEP ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 static esp_err_t scd4x_recover_error(scd4x_t *dev);
@@ -171,6 +182,7 @@ static esp_err_t scd4x_recover_error(scd4x_t *dev)
         }
         break;
     case SCD4X_MODE_IDLE:
+    case SCD4X_MODE_SLEEP:
     default:
         break;
     }
@@ -226,7 +238,7 @@ static esp_err_t scd4x_read_word(scd4x_t *dev, uint16_t command, uint16_t *value
 
 esp_err_t scd4x_start_periodic_measurement(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_START_PERIODIC_MEASUREMENT);
@@ -238,7 +250,7 @@ esp_err_t scd4x_start_periodic_measurement(scd4x_t *dev)
 
 esp_err_t scd4x_stop_periodic_measurement(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_awake(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_STOP_PERIODIC_MEASUREMENT);
@@ -251,7 +263,7 @@ esp_err_t scd4x_stop_periodic_measurement(scd4x_t *dev)
 
 esp_err_t scd4x_set_temperature_offset(scd4x_t *dev, float offset_c)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     if (offset_c < 0.0f || offset_c > 175.0f) {
@@ -263,7 +275,7 @@ esp_err_t scd4x_set_temperature_offset(scd4x_t *dev, float offset_c)
 
 esp_err_t scd4x_get_temperature_offset(scd4x_t *dev, float *offset_c)
 {
-    if (!dev || !offset_c) {
+    if (!offset_c || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     uint16_t  raw;
@@ -277,7 +289,7 @@ esp_err_t scd4x_get_temperature_offset(scd4x_t *dev, float *offset_c)
 
 esp_err_t scd4x_set_sensor_altitude(scd4x_t *dev, uint16_t altitude_m)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_SENSOR_ALTITUDE, altitude_m);
@@ -285,7 +297,7 @@ esp_err_t scd4x_set_sensor_altitude(scd4x_t *dev, uint16_t altitude_m)
 
 esp_err_t scd4x_get_sensor_altitude(scd4x_t *dev, uint16_t *altitude_m)
 {
-    if (!dev || !altitude_m) {
+    if (!altitude_m || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_read_word(dev, SCD4X_CMD_GET_SENSOR_ALTITUDE, altitude_m);
@@ -293,7 +305,7 @@ esp_err_t scd4x_get_sensor_altitude(scd4x_t *dev, uint16_t *altitude_m)
 
 esp_err_t scd4x_set_ambient_pressure(scd4x_t *dev, uint16_t pressure_hpa)
 {
-    if (!dev) {
+    if (scd4x_require_awake(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     if (pressure_hpa < 700 || pressure_hpa > 1200) {
@@ -304,7 +316,7 @@ esp_err_t scd4x_set_ambient_pressure(scd4x_t *dev, uint16_t pressure_hpa)
 
 esp_err_t scd4x_get_ambient_pressure(scd4x_t *dev, uint16_t *pressure_hpa)
 {
-    if (!dev || !pressure_hpa) {
+    if (!pressure_hpa || scd4x_require_awake(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_read_word(dev, SCD4X_CMD_SET_AMBIENT_PRESSURE, pressure_hpa);
@@ -312,7 +324,7 @@ esp_err_t scd4x_get_ambient_pressure(scd4x_t *dev, uint16_t *pressure_hpa)
 
 esp_err_t scd4x_data_ready(scd4x_t *dev, bool *ready)
 {
-    if (!dev || !ready) {
+    if (!ready || scd4x_require_awake(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     *ready           = false;
@@ -327,7 +339,7 @@ esp_err_t scd4x_data_ready(scd4x_t *dev, bool *ready)
 
 esp_err_t scd4x_read_measurement(scd4x_t *dev, scd4x_measurement_t *measurement)
 {
-    if (!dev || !measurement) {
+    if (!measurement || scd4x_require_awake(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     bool      data_ready;
@@ -351,7 +363,7 @@ esp_err_t scd4x_read_measurement(scd4x_t *dev, scd4x_measurement_t *measurement)
 
 esp_err_t scd4x_perform_forced_recalibration(scd4x_t *dev, uint16_t target_co2_ppm, int16_t *frc_correction)
 {
-    if (!dev || !frc_correction) {
+    if (!frc_correction || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command_and_value(dev, SCD4X_CMD_PERFORM_FORCED_RECALIBRATION, target_co2_ppm);
@@ -382,7 +394,7 @@ esp_err_t scd4x_perform_forced_recalibration(scd4x_t *dev, uint16_t target_co2_p
 
 esp_err_t scd4x_set_automatic_self_calibration(scd4x_t *dev, bool enabled)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_ENABLED, enabled ? 1 : 0);
@@ -390,7 +402,7 @@ esp_err_t scd4x_set_automatic_self_calibration(scd4x_t *dev, bool enabled)
 
 esp_err_t scd4x_get_automatic_self_calibration(scd4x_t *dev, bool *enabled)
 {
-    if (!dev || !enabled) {
+    if (!enabled || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     uint16_t  raw;
@@ -404,7 +416,7 @@ esp_err_t scd4x_get_automatic_self_calibration(scd4x_t *dev, bool *enabled)
 
 esp_err_t scd4x_set_automatic_self_calibration_target(scd4x_t *dev, uint16_t ppm)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_TARGET, ppm);
@@ -412,7 +424,7 @@ esp_err_t scd4x_set_automatic_self_calibration_target(scd4x_t *dev, uint16_t ppm
 
 esp_err_t scd4x_get_automatic_self_calibration_target(scd4x_t *dev, uint16_t *ppm)
 {
-    if (!dev || !ppm) {
+    if (!ppm || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_read_word(dev, SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_TARGET, ppm);
@@ -420,7 +432,7 @@ esp_err_t scd4x_get_automatic_self_calibration_target(scd4x_t *dev, uint16_t *pp
 
 esp_err_t scd4x_set_automatic_self_calibration_initial_period(scd4x_t *dev, uint16_t hours)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     if ((hours % 4) != 0) {
@@ -431,7 +443,7 @@ esp_err_t scd4x_set_automatic_self_calibration_initial_period(scd4x_t *dev, uint
 
 esp_err_t scd4x_get_automatic_self_calibration_initial_period(scd4x_t *dev, uint16_t *hours)
 {
-    if (!dev || !hours) {
+    if (!hours || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_read_word(dev, SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD, hours);
@@ -439,7 +451,7 @@ esp_err_t scd4x_get_automatic_self_calibration_initial_period(scd4x_t *dev, uint
 
 esp_err_t scd4x_set_automatic_self_calibration_standard_period(scd4x_t *dev, uint16_t hours)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     if ((hours % 4) != 0) {
@@ -450,7 +462,7 @@ esp_err_t scd4x_set_automatic_self_calibration_standard_period(scd4x_t *dev, uin
 
 esp_err_t scd4x_get_automatic_self_calibration_standard_period(scd4x_t *dev, uint16_t *hours)
 {
-    if (!dev || !hours) {
+    if (!hours || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_read_word(dev, SCD4X_CMD_GET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD, hours);
@@ -458,7 +470,7 @@ esp_err_t scd4x_get_automatic_self_calibration_standard_period(scd4x_t *dev, uin
 
 esp_err_t scd4x_start_low_power_periodic_measurement(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_START_LOW_POWER_PERIODIC_MEASUREMENT);
@@ -470,7 +482,7 @@ esp_err_t scd4x_start_low_power_periodic_measurement(scd4x_t *dev)
 
 esp_err_t scd4x_persist_settings(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_PERSIST_SETTINGS);
@@ -483,7 +495,7 @@ esp_err_t scd4x_persist_settings(scd4x_t *dev)
 
 esp_err_t scd4x_get_serial_number(scd4x_t *dev, uint16_t serial[3])
 {
-    if (!dev || !serial) {
+    if (!serial || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     return scd4x_read_words(dev, SCD4X_CMD_GET_SERIAL_NUMBER, serial, 3, 1);
@@ -491,7 +503,7 @@ esp_err_t scd4x_get_serial_number(scd4x_t *dev, uint16_t serial[3])
 
 esp_err_t scd4x_perform_self_test(scd4x_t *dev, bool *malfunction)
 {
-    if (!dev || !malfunction) {
+    if (!malfunction || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     uint16_t  result;
@@ -505,7 +517,7 @@ esp_err_t scd4x_perform_self_test(scd4x_t *dev, bool *malfunction)
 
 esp_err_t scd4x_perform_factory_reset(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_PERFORM_FACTORY_RESET);
@@ -519,7 +531,7 @@ esp_err_t scd4x_perform_factory_reset(scd4x_t *dev)
 
 esp_err_t scd4x_reinit(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_REINIT);
@@ -533,7 +545,7 @@ esp_err_t scd4x_reinit(scd4x_t *dev)
 
 esp_err_t scd4x_get_sensor_variant(scd4x_t *dev, scd4x_variant_t *variant)
 {
-    if (!dev || !variant) {
+    if (!variant || scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     uint16_t  raw;
@@ -557,7 +569,7 @@ esp_err_t scd4x_get_sensor_variant(scd4x_t *dev, scd4x_variant_t *variant)
 
 esp_err_t scd4x_measure_single_shot(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_MEASURE_SINGLE_SHOT);
@@ -570,7 +582,7 @@ esp_err_t scd4x_measure_single_shot(scd4x_t *dev)
 
 esp_err_t scd4x_measure_single_shot_rht_only(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_MEASURE_SINGLE_SHOT_RHT_ONLY);
@@ -583,7 +595,7 @@ esp_err_t scd4x_measure_single_shot_rht_only(scd4x_t *dev)
 
 esp_err_t scd4x_power_down(scd4x_t *dev)
 {
-    if (!dev) {
+    if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = scd4x_write_command(dev, SCD4X_CMD_POWER_DOWN);
@@ -591,18 +603,20 @@ esp_err_t scd4x_power_down(scd4x_t *dev)
         return ret;
     }
     scd4x_wait_ms(1);
-    dev->mode = SCD4X_MODE_IDLE;
+    dev->mode = SCD4X_MODE_SLEEP;
     return ESP_OK;
 }
 
 esp_err_t scd4x_wake_up(scd4x_t *dev)
 {
-    if (!dev) {
+    if (!dev || dev->mode != SCD4X_MODE_SLEEP) {
         return ESP_ERR_INVALID_STATE;
     }
     // wake_up command may NACK since sensor is asleep; ignore the return value
     scd4x_write_command_nr(dev, SCD4X_CMD_WAKE_UP);
     scd4x_wait_ms(30);
+    dev->has_error = false;
+    dev->mode      = SCD4X_MODE_IDLE;
     return ESP_OK;
 }
 
@@ -623,6 +637,22 @@ scd4x_t *scd4x_init(i2c_master_dev_handle_t dev_handle)
         free(dev);
         return NULL;
     }
-    scd4x_wait_ms(100);
     return dev;
+}
+
+esp_err_t scd4x_deinit(scd4x_t **dev)
+{
+    if (!dev || !*dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    scd4x_t *device = *dev;
+    if (device->mode == SCD4X_MODE_PERIODIC || device->mode == SCD4X_MODE_LOW_POWER_PERIODIC) {
+        esp_err_t ret = scd4x_stop_periodic_measurement(device);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    free(device);
+    *dev = NULL;
+    return ESP_OK;
 }

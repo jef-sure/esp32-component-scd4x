@@ -80,9 +80,12 @@ git clone https://github.com/jef-sure/esp32-component-scd4x.git scd4x
 | SDA       | I2C data line (any GPIO) |
 | SCL       | I2C clock line (any GPIO) |
 | VDD       | 3.3V       |
+| VDDH      | Same supply as VDD, connected close to the sensor |
 | GND       | GND        |
 
 The I2C address is fixed at `0x62`. Connect SDA/SCL to whichever GPIOs you configure for your I2C master bus.
+
+The datasheet recommends external pull-up resistors on SDA and SCL (e.g. 10 kΩ) and a low-noise supply able to deliver the peak current (up to 205 mA at 3.3 V). Breakout boards usually include the pull-ups and the VDD/VDDH connection.
 
 ## Quick Start
 
@@ -121,7 +124,6 @@ typedef enum __attribute__((packed)) {
 
 typedef struct {
     i2c_master_dev_handle_t i2c_dev;
-    bool         has_error;
     scd4x_mode_t mode;
 } scd4x_t;
 
@@ -155,9 +157,9 @@ typedef struct {
 
 | Function | Description |
 |----------|-------------|
-| `scd4x_set_temperature_offset()` | Set temperature offset for compensation (0–175 °C) |
+| `scd4x_set_temperature_offset()` | Set temperature offset for compensation (0–175 °C, recommended 0–20 °C) |
 | `scd4x_get_temperature_offset()` | Read current temperature offset |
-| `scd4x_set_sensor_altitude()` | Set altitude for pressure compensation |
+| `scd4x_set_sensor_altitude()` | Set altitude for pressure compensation (0..3000 m) |
 | `scd4x_get_sensor_altitude()` | Read configured altitude |
 | `scd4x_set_ambient_pressure()` | Set ambient pressure in hPa (700..1200, can be sent during measurement) |
 | `scd4x_get_ambient_pressure()` | Read configured ambient pressure |
@@ -186,8 +188,8 @@ typedef struct {
 | `scd4x_perform_factory_reset()` | Reset all settings to factory defaults |
 | `scd4x_reinit()` | Reload settings from EEPROM |
 | `scd4x_get_sensor_variant()` | Read sensor variant (SCD40 / SCD41 / SCD43) |
-| `scd4x_power_down()` | Enter sleep mode |
-| `scd4x_wake_up()` | Wake from sleep mode |
+| `scd4x_power_down()` | Enter sleep mode (ASC is not available in power-cycled single-shot operation) |
+| `scd4x_wake_up()` | Wake from sleep mode and verify the sensor responds |
 
 ## License
 

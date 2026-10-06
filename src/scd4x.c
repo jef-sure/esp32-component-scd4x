@@ -71,7 +71,10 @@ static uint8_t scd4x_crc8(const uint8_t *data, size_t length)
 
 static void scd4x_wait_ms(int ms)
 {
-    vTaskDelay(pdMS_TO_TICKS(ms));
+    // Round up to whole ticks and add one more: vTaskDelay(n) only guarantees
+    // n - 1 full tick periods, and pdMS_TO_TICKS() truncates (1 ms -> 0 ticks at 100 Hz).
+    TickType_t ticks = (TickType_t)(((uint32_t)ms * configTICK_RATE_HZ + 999U) / 1000U);
+    vTaskDelay(ticks + 1);
 }
 
 static esp_err_t scd4x_require_idle(const scd4x_t *dev)
@@ -109,11 +112,9 @@ static esp_err_t scd4x_transmit_with_recovery(scd4x_t *dev, const uint8_t *buffe
 
     esp_err_t ret = scd4x_write_nr(dev, buffer, length);
     if (ret == ESP_OK) {
-        dev->has_error = false;
         return ret;
     }
 
-    dev->has_error = true;
     ESP_LOGW(TAG, "Write transfer failed: %s. Trying to recover.", esp_err_to_name(ret));
 
     esp_err_t recover_ret = scd4x_recover_error(dev);
@@ -121,11 +122,7 @@ static esp_err_t scd4x_transmit_with_recovery(scd4x_t *dev, const uint8_t *buffe
         return recover_ret;
     }
 
-    ret = scd4x_write_nr(dev, buffer, length);
-    if (ret == ESP_OK) {
-        dev->has_error = false;
-    }
-    return ret;
+    return scd4x_write_nr(dev, buffer, length);
 }
 
 static esp_err_t scd4x_write_command(scd4x_t *dev, uint16_t command)
@@ -139,11 +136,7 @@ static esp_err_t scd4x_read_data(scd4x_t *dev, uint8_t *data, size_t length)
     if (!dev || !data || length == 0) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (dev->has_error) {
-        return ESP_ERR_INVALID_STATE; // Don't attempt to read if we're in an error state, force recovery first
-    }
-    esp_err_t ret = i2c_master_receive(dev->i2c_dev, data, length, SCD4X_I2C_TIMEOUT_MS); // Send repeated start
-    return ret;
+    return i2c_master_receive(dev->i2c_dev, data, length, SCD4X_I2C_TIMEOUT_MS);
 }
 
 static esp_err_t scd4x_recover_error(scd4x_t *dev)
@@ -165,7 +158,6 @@ static esp_err_t scd4x_recover_error(scd4x_t *dev)
         return ret;
     }
     scd4x_wait_ms(500);
-    dev->has_error = false; // Clear error state after recovery attempt
     switch (dev->mode) {
     case SCD4X_MODE_PERIODIC:
         ret = scd4x_write_command_nr(dev, SCD4X_CMD_START_PERIODIC_MEASUREMENT);
@@ -198,6 +190,15 @@ static esp_err_t scd4x_write_command_and_value(scd4x_t *dev, uint16_t command, u
     return scd4x_transmit_with_recovery(dev, buffer, sizeof(buffer));
 }
 
+static esp_err_t scd4x_write_word(scd4x_t *dev, uint16_t command, uint16_t value)
+{
+    esp_err_t ret = scd4x_write_command_and_value(dev, command, value);
+    if (ret == ESP_OK) {
+        scd4x_wait_ms(1); // command execution time of all "write" sequences
+    }
+    return ret;
+}
+
 static esp_err_t scd4x_read_words(scd4x_t *dev, uint16_t command, uint16_t *values, size_t word_count, int delay_after_cmd)
 {
     if (!dev || !values || word_count == 0) {
@@ -214,7 +215,6 @@ static esp_err_t scd4x_read_words(scd4x_t *dev, uint16_t command, uint16_t *valu
     uint8_t data[word_count * 3];
     ret = scd4x_read_data(dev, data, sizeof(data));
     if (ret != ESP_OK) {
-        dev->has_error = true;
         return ret;
     }
 
@@ -222,7 +222,6 @@ static esp_err_t scd4x_read_words(scd4x_t *dev, uint16_t command, uint16_t *valu
         uint8_t crc = scd4x_crc8(&data[i * 3], 2);
         if (crc != data[i * 3 + 2]) {
             ESP_LOGE(TAG, "CRC mismatch: calculated 0x%02X, received 0x%02X", crc, data[i * 3 + 2]);
-            dev->has_error = true;
             return ESP_ERR_INVALID_CRC;
         }
         values[i] = ((uint16_t)data[i * 3] << 8) | data[i * 3 + 1];
@@ -266,11 +265,11 @@ esp_err_t scd4x_set_temperature_offset(scd4x_t *dev, float offset_c)
     if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (offset_c < 0.0f || offset_c > 175.0f) {
+    if (!(offset_c >= 0.0f && offset_c <= 175.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
     uint16_t raw = (uint16_t)(offset_c * 65535.0f / 175.0f + 0.5f);
-    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_TEMPERATURE_OFFSET, raw);
+    return scd4x_write_word(dev, SCD4X_CMD_SET_TEMPERATURE_OFFSET, raw);
 }
 
 esp_err_t scd4x_get_temperature_offset(scd4x_t *dev, float *offset_c)
@@ -292,7 +291,10 @@ esp_err_t scd4x_set_sensor_altitude(scd4x_t *dev, uint16_t altitude_m)
     if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_SENSOR_ALTITUDE, altitude_m);
+    if (altitude_m > 3000) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return scd4x_write_word(dev, SCD4X_CMD_SET_SENSOR_ALTITUDE, altitude_m);
 }
 
 esp_err_t scd4x_get_sensor_altitude(scd4x_t *dev, uint16_t *altitude_m)
@@ -311,7 +313,7 @@ esp_err_t scd4x_set_ambient_pressure(scd4x_t *dev, uint16_t pressure_hpa)
     if (pressure_hpa < 700 || pressure_hpa > 1200) {
         return ESP_ERR_INVALID_ARG;
     }
-    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AMBIENT_PRESSURE, pressure_hpa);
+    return scd4x_write_word(dev, SCD4X_CMD_SET_AMBIENT_PRESSURE, pressure_hpa);
 }
 
 esp_err_t scd4x_get_ambient_pressure(scd4x_t *dev, uint16_t *pressure_hpa)
@@ -374,13 +376,11 @@ esp_err_t scd4x_perform_forced_recalibration(scd4x_t *dev, uint16_t target_co2_p
     uint8_t data[3];
     ret = scd4x_read_data(dev, data, sizeof(data));
     if (ret != ESP_OK) {
-        dev->has_error = true;
         return ret;
     }
     uint8_t crc = scd4x_crc8(data, 2);
     if (crc != data[2]) {
         ESP_LOGE(TAG, "CRC mismatch in FRC response");
-        dev->has_error = true;
         return ESP_ERR_INVALID_CRC;
     }
     uint16_t word = ((uint16_t)data[0] << 8) | data[1];
@@ -397,7 +397,7 @@ esp_err_t scd4x_set_automatic_self_calibration(scd4x_t *dev, bool enabled)
     if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_ENABLED, enabled ? 1 : 0);
+    return scd4x_write_word(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_ENABLED, enabled ? 1 : 0);
 }
 
 esp_err_t scd4x_get_automatic_self_calibration(scd4x_t *dev, bool *enabled)
@@ -419,7 +419,7 @@ esp_err_t scd4x_set_automatic_self_calibration_target(scd4x_t *dev, uint16_t ppm
     if (scd4x_require_idle(dev) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_TARGET, ppm);
+    return scd4x_write_word(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_TARGET, ppm);
 }
 
 esp_err_t scd4x_get_automatic_self_calibration_target(scd4x_t *dev, uint16_t *ppm)
@@ -438,7 +438,7 @@ esp_err_t scd4x_set_automatic_self_calibration_initial_period(scd4x_t *dev, uint
     if ((hours % 4) != 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD, hours);
+    return scd4x_write_word(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD, hours);
 }
 
 esp_err_t scd4x_get_automatic_self_calibration_initial_period(scd4x_t *dev, uint16_t *hours)
@@ -457,7 +457,7 @@ esp_err_t scd4x_set_automatic_self_calibration_standard_period(scd4x_t *dev, uin
     if ((hours % 4) != 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    return scd4x_write_command_and_value(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD, hours);
+    return scd4x_write_word(dev, SCD4X_CMD_SET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD, hours);
 }
 
 esp_err_t scd4x_get_automatic_self_calibration_standard_period(scd4x_t *dev, uint16_t *hours)
@@ -615,8 +615,14 @@ esp_err_t scd4x_wake_up(scd4x_t *dev)
     // wake_up command may NACK since sensor is asleep; ignore the return value
     scd4x_write_command_nr(dev, SCD4X_CMD_WAKE_UP);
     scd4x_wait_ms(30);
-    dev->has_error = false;
-    dev->mode      = SCD4X_MODE_IDLE;
+    // The sensor does not acknowledge wake_up; verify the idle state by reading the serial number
+    uint16_t  serial[3];
+    esp_err_t ret = scd4x_read_words(dev, SCD4X_CMD_GET_SERIAL_NUMBER, serial, 3, 1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Sensor did not respond after wake up: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    dev->mode = SCD4X_MODE_IDLE;
     return ESP_OK;
 }
 
@@ -627,9 +633,8 @@ scd4x_t *scd4x_init(i2c_master_dev_handle_t dev_handle)
         ESP_LOGE(TAG, "Failed to allocate memory for SCD4X device");
         return NULL;
     }
-    dev->i2c_dev   = dev_handle;
-    dev->has_error = false;
-    dev->mode      = SCD4X_MODE_IDLE;
+    dev->i2c_dev = dev_handle;
+    dev->mode    = SCD4X_MODE_IDLE;
 
     esp_err_t ret = scd4x_stop_periodic_measurement(dev);
     if (ret != ESP_OK) {
@@ -649,8 +654,11 @@ esp_err_t scd4x_deinit(scd4x_t **dev)
     scd4x_t *device = *dev;
     if (device->mode == SCD4X_MODE_PERIODIC || device->mode == SCD4X_MODE_LOW_POWER_PERIODIC) {
         ret = scd4x_stop_periodic_measurement(device);
+        if (ret != ESP_OK) {
+            return ret;
+        }
     }
     free(device);
     *dev = NULL;
-    return ret;
+    return ESP_OK;
 }

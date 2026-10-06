@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.2.0
+
+Review of the driver against the SCD4x datasheet (rev. 1.7, April 2025).
+
+Breaking changes:
+
+- Removed the unused `has_error` field from `scd4x_t`. I2C error recovery is
+  unchanged: it still runs inside the failing command when a write fails.
+- `scd4x_wake_up()` now verifies the idle state by reading the serial number
+  (datasheet §3.11.4) and returns an error if the sensor does not respond; the
+  sensor is then still considered asleep. It previously always returned
+  `ESP_OK`.
+- `scd4x_set_sensor_altitude()` returns `ESP_ERR_INVALID_ARG` for altitudes
+  above 3000 m (datasheet §3.7.3).
+- `scd4x_deinit()` keeps the context allocated and the caller's pointer intact
+  when stopping periodic measurement fails, as documented.
+
+Fixes:
+
+- All `set_*` commands now wait for the 1 ms command execution time before
+  returning, so that the next command is not sent too early.
+- Delays are rounded up to whole ticks plus one. At the default 100 Hz tick
+  rate a 1 ms wait used to become 0 ticks, which could cause sporadic read
+  failures.
+- `scd4x_set_temperature_offset()` rejects NaN.
+
+Documentation:
+
+- An ASC initial / standard period of 0 results in an immediate correction; it
+  does not disable ASC.
+- Added the recommended temperature offset range (0–20 °C), the valid altitude
+  range, and a note that ASC is not available in power-cycled single-shot
+  operation.
+- README wiring now lists VDDH and the datasheet's pull-up and supply
+  recommendations.
+
 ## 0.1.0
 
 - Added `scd4x_deinit()` to stop periodic measurement, release the driver

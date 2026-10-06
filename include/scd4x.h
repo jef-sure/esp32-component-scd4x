@@ -24,9 +24,8 @@ typedef enum __attribute__((packed))
 
 typedef struct
 {
-    i2c_master_dev_handle_t i2c_dev;   /*!< I2C master device handle */
-    bool                    has_error; /*!< Flag to indicate if the device has encountered an error */
-    scd4x_mode_t            mode;      /*!< Current sensor operating state (used for validation and recovery) */
+    i2c_master_dev_handle_t i2c_dev; /*!< I2C master device handle */
+    scd4x_mode_t            mode;    /*!< Current sensor operating state (used for validation and recovery) */
 } scd4x_t;
 
 typedef struct
@@ -134,12 +133,12 @@ esp_err_t scd4x_get_sensor_altitude(scd4x_t *dev, uint16_t *altitude_m);
  * @brief Set the sensor altitude for pressure compensation.
  *
  * Must be called while the sensor is in idle mode. Use scd4x_persist_settings()
- * to save to EEPROM. Default is 0 m.
+ * to save to EEPROM. Default is 0 m. Valid range: 0..3000 m (datasheet §3.7.3).
  * Max command duration: 1 ms.
  *
  * @param dev        Device handle
  * @param altitude_m Altitude in meters above sea level
- * @return ESP_OK on success
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if out of range
  */
 esp_err_t scd4x_set_sensor_altitude(scd4x_t *dev, uint16_t altitude_m);
 
@@ -160,6 +159,7 @@ esp_err_t scd4x_get_temperature_offset(scd4x_t *dev, float *offset_c);
  *
  * Does not affect CO2 accuracy. Must be called while the sensor is in idle mode.
  * Use scd4x_persist_settings() to save to EEPROM. Default is 4 °C.
+ * Recommended values are between 0 °C and 20 °C (datasheet §3.7.1).
  * Max command duration: 1 ms.
  *
  * @param dev      Device handle
@@ -283,7 +283,7 @@ esp_err_t scd4x_get_automatic_self_calibration_target(scd4x_t *dev, uint16_t *pp
  * to save to EEPROM. Max command duration: 1 ms.
  *
  * @param dev      Device handle
- * @param hours    Initial period in hours (multiple of 4, 0 disables ASC)
+ * @param hours    Initial period in hours (multiple of 4, 0 results in an immediate correction)
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if not a multiple of 4
  */
 esp_err_t scd4x_set_automatic_self_calibration_initial_period(scd4x_t *dev, uint16_t hours);
@@ -312,7 +312,7 @@ esp_err_t scd4x_get_automatic_self_calibration_initial_period(scd4x_t *dev, uint
  * to save to EEPROM. Max command duration: 1 ms.
  *
  * @param dev      Device handle
- * @param hours    Standard period in hours (multiple of 4, 0 disables ASC)
+ * @param hours    Standard period in hours (multiple of 4, 0 results in an immediate correction)
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if not a multiple of 4
  */
 esp_err_t scd4x_set_automatic_self_calibration_standard_period(scd4x_t *dev, uint16_t hours);
@@ -428,6 +428,8 @@ esp_err_t scd4x_measure_single_shot_rht_only(scd4x_t *dev);
  * @brief Put the sensor into sleep mode to reduce current consumption.
  *
  * The sensor will not respond to any command other than wake_up while sleeping.
+ * ASC is not available when the sensor is power-cycled between single-shot
+ * measurements (datasheet §3.11).
  * Must be called while the sensor is idle. Max command duration: 1 ms.
  *
  * @param dev Device handle
@@ -439,9 +441,10 @@ esp_err_t scd4x_power_down(scd4x_t *dev);
  * @brief Wake the sensor from sleep mode entered via scd4x_power_down().
  *
  * The wake-up command may NACK because the sensor is asleep; this is expected.
- * Blocks for 30 ms to allow the sensor to become ready.
+ * Blocks for 30 ms to allow the sensor to become ready, then verifies the idle
+ * state by reading the serial number (datasheet §3.11.4).
  *
  * @param dev Device handle
- * @return ESP_OK (always succeeds; NACK from sleeping sensor is ignored)
+ * @return ESP_OK on success; on failure the sensor is still considered asleep
  */
 esp_err_t scd4x_wake_up(scd4x_t *dev);

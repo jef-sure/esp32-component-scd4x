@@ -60,17 +60,18 @@ While powered down, only `scd4x_wake_up()` is accepted.
 
 ## Installation
 
-From your project directory, use the [IDF Component Manager](https://docs.espressif.com/projects/idf-component-manager/en/latest/use/how_to_add_dependency.html) to add the dependency from Git:
+The component is published in the [ESP Component Registry](https://components.espressif.com/components/jef-sure/scd4x). From your project directory, add it with the [IDF Component Manager](https://docs.espressif.com/projects/idf-component-manager/en/latest/use/how_to_add_dependency.html):
 
 ```bash
-idf.py add-dependency jef-sure/scd4x
+idf.py add-dependency "jef-sure/scd4x^0.2.0"
 ```
 
-Alternatively, clone into your project's `components/` directory:
+To track the Git repository instead of a registry release, declare it in your project's `main/idf_component.yml`:
 
-```bash
-cd components
-git clone https://github.com/jef-sure/esp32-component-scd4x.git scd4x
+```yaml
+dependencies:
+  jef-sure/scd4x:
+    git: https://github.com/jef-sure/esp32-component-scd4x.git
 ```
 
 ## Wiring
